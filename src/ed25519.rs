@@ -23,15 +23,19 @@ use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 
-use ec25519::{KeyPair, Noise, PublicKey, SecretKey, Seed, Signature};
+use ec25519::{KeyPair, PublicKey, SecretKey, Seed, Signature};
 
 use crate::{Algo, Chain, InvalidPubkey, InvalidSig, SsiPub, SsiSig};
 
 #[derive(Clone, Eq, PartialEq, From)]
-pub struct Ed25519Secret(pub(crate) SecretKey);
+pub struct Ed25519Secret {
+    chain: Chain,
+    algo: Algo,
+    key: SecretKey,
+}
 
 impl Ord for Ed25519Secret {
-    fn cmp(&self, other: &Self) -> Ordering { self.0.as_slice().cmp(other.0.as_slice()) }
+    fn cmp(&self, other: &Self) -> Ordering { self.serialize().cmp(other.serialize()) }
 }
 
 impl PartialOrd for Ed25519Secret {
@@ -39,43 +43,27 @@ impl PartialOrd for Ed25519Secret {
 }
 
 impl Hash for Ed25519Secret {
-    fn hash<H: Hasher>(&self, state: &mut H) { self.0.as_slice().hash(state) }
-}
-
-impl From<Ed25519Secret> for [u8; 64] {
-    fn from(ssi: Ed25519Secret) -> Self { *ssi.0.deref() }
-}
-
-impl From<[u8; 64]> for Ed25519Secret {
-    fn from(value: [u8; 64]) -> Self {
-        Self(SecretKey::from_slice(&value).expect("invalid secret key"))
-    }
+    fn hash<H: Hasher>(&self, state: &mut H) { self.serialize().hash(state) }
 }
 
 impl Ed25519Secret {
     pub fn new(chain: Chain) -> Self {
-        loop {
-            let pair = KeyPair::from_seed(Seed::generate());
-            let pk = pair.pk;
+        let pair = KeyPair::from_seed(Seed::generate());
 
-            if pk[30] != u8::from(Algo::Ed25519) || pk[31] != u8::from(chain) {
-                continue;
-            }
-
-            let sig = pair.sk.sign("test", Some(Noise::generate()));
-            pk.verify("test", &sig).expect("unable to create key");
-
-            return Self(pair.sk);
+        Self {
+            chain,
+            algo: Algo::Ed25519,
+            key: pair.sk,
         }
     }
 
     pub fn to_public(&self) -> SsiPub {
-        let pk = self.0.public_key();
-        SsiPub::from(*pk)
+        let pk = self.key.public_key();
+        SsiPub::with(self.chain, self.algo, *pk)
     }
 
     pub fn sign(&self, msg: [u8; 32]) -> SsiSig {
-        let sig = self.0.sign(msg, None);
+        let sig = self.key.sign(msg, None);
         SsiSig::from(*sig)
     }
 }
